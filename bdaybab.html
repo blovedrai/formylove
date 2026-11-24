@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>cat maze — 3 mazes</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    font-family: ui-rounded, "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: radial-gradient(circle at 50% 0%, #3a1f6b 0%, #1a1030 45%, #0d0718 100%);
+    color:#ede6ff;
+    display:flex; flex-direction:column; align-items:center;
+    gap:12px;
+    padding:14px 12px 22px;
+    overflow-x:hidden;
+    -webkit-tap-highlight-color:transparent;
+    user-select:none;
+  }
+
+  header{text-align:center}
+  h1{
+    font-size: clamp(22px, 5.6vw, 32px);
+    font-weight: 700;
+    letter-spacing:.5px;
+    margin: 0 0 2px;
+    color:#f4ecff;
+    text-shadow: 0 0 24px rgba(170,130,255,.55);
+  }
+  .sub{margin:0; font-size:13px; color:#b9a6e6}
+
+  .hud{
+    display:flex; gap:16px; font-size:13px; color:#b9a6e6;
+    background:rgba(180,140,255,.08);
+    padding:6px 16px; border-radius:99px;
+    border:1px solid rgba(180,140,255,.16);
+    flex-wrap:wrap; justify-content:center;
+  }
+  .hud b{color:#e0d4ff; font-variant-numeric:tabular-nums}
+
+  /* ---------- zoomed camera viewport ---------- */
+  .stage{display:flex; justify-content:center}
+
+  .viewport{
+    position:relative;
+    overflow:hidden;
+    border-radius:18px;
+    background:#130b24;
+    box-shadow:0 0 0 3px #4b3a7c, 0 22px 50px -18px #000, 0 0 90px -25px #a07cff;
+    touch-action:none;
+  }
+  .maze{
+    position:absolute; top:0; left:0;
+    display:grid;
+    transition: transform .18s ease-out;
+    will-change: transform;
+  }
+  .vignette{
+    position:absolute; inset:0; pointer-events:none;
+    box-shadow: inset 0 0 70px 16px rgba(13,7,24,.82);
+    border-radius:18px;
+  }
+
+  /* ---------- designed walls ---------- */
+  .cell.wall{
+    background-color:#4b3a7c;
+    background-image:
+      radial-gradient(circle at 32% 24%, rgba(214,186,255,.30), transparent 58%),
+      repeating-linear-gradient(45deg, rgba(255,255,255,.035) 0 2px, transparent 2px 6px),
+      linear-gradient(135deg, #5f4a9c, #372a5e);
+    box-shadow:
+      inset 0 1px 0 rgba(224,202,255,.38),
+      inset 0 -2px 5px rgba(0,0,0,.38),
+      inset 0 0 0 1px rgba(140,115,205,.10);
+  }
+  .cell.wall.r-tl{border-top-left-radius:42%}
+  .cell.wall.r-tr{border-top-right-radius:42%}
+  .cell.wall.r-bl{border-bottom-left-radius:42%}
+  .cell.wall.r-br{border-bottom-right-radius:42%}
+
+  .cell.path{
+    background-color:#150c27;
+    background-image: radial-gradient(circle at 50% 45%, rgba(150,110,255,.07), transparent 70%);
+  }
+  .cell.visited{
+    background-color:#1d1236;
+    background-image: radial-gradient(circle at 50% 50%, rgba(185,145,255,.30), rgba(185,145,255,.06) 70%);
+  }
+
+  .cat, .goal{
+    position:absolute; left:0; top:0;
+    display:flex; align-items:center; justify-content:center;
+    line-height:1;
+    will-change:transform;
+    pointer-events:none;
+  }
+  .cat{transition:transform .12s ease-out; z-index:3}
+  .cat span{display:block; animation:bob 1.5s ease-in-out infinite}
+  @keyframes bob{50%{transform:translateY(-6%) scale(1.06)}}
+
+  .goal{z-index:2}
+  .goal span{display:block; animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{50%{transform:scale(1.15) rotate(6deg)}}
+
+  .dpad{
+    display:grid;
+    grid-template-areas:". up ." "left . right" ". down .";
+    gap:6px;
+    margin-top:2px;
+  }
+  .dpad button{
+    width:58px; height:50px;
+    font-size:16px;
+    background:rgba(180,140,255,.10);
+    color:#e0d4ff;
+    border:1px solid rgba(180,140,255,.20);
+    border-radius:12px;
+    cursor:pointer;
+    transition:background .12s, transform .08s;
+  }
+  .dpad button:active{background:rgba(180,140,255,.38); transform:scale(.94)}
+  .dpad [data-dy="-1"]{grid-area:up}
+  .dpad [data-dy="1"]{grid-area:down}
+  .dpad [data-dx="-1"]{grid-area:left}
+  .dpad [data-dx="1"]{grid-area:right}
+
+  .hint{font-size:12px; color:#8d7bb8; margin:0; text-align:center; max-width:360px; line-height:1.5}
+
+  /* ---------- win overlay ---------- */
+  .overlay{
+    position:fixed; inset:0; z-index:50;
+    display:flex; align-items:center; justify-content:center;
+    padding:20px;
+    background:rgba(13,7,24,.76);
+    backdrop-filter:blur(6px);
+    opacity:1; transition:opacity .25s;
+  }
+  .overlay.hidden{display:none}
+  .card{
+    width:min(430px,100%);
+    background:linear-gradient(160deg,#2f1f5a,#1a1030);
+    border:1px solid rgba(190,160,255,.28);
+    border-radius:22px;
+    padding:26px 24px 22px;
+    text-align:center;
+    box-shadow:0 30px 70px -20px #000, 0 0 80px -30px #a07cff;
+    animation:pop .32s cubic-bezier(.2,1.5,.5,1);
+  }
+  @keyframes pop{from{transform:scale(.85); opacity:0}}
+  .card .big{font-size:38px; margin-bottom:6px}
+
+  .card h2{
+    margin:0 0 8px;
+    font-size:clamp(21px, 5vw, 25px);
+    color:#f4ecff;
+  }
+  .card p{
+    margin:0 0 20px;
+    font-size:clamp(15px, 3.6vw, 17px);
+    line-height:1.5;
+    color:#d6c6fb;
+  }
+  .card .row{display:flex; gap:10px; flex-wrap:wrap; justify-content:center}
+  .card button{
+    font:inherit; font-size:14px; font-weight:600;
+    padding:11px 22px; border-radius:12px; cursor:pointer;
+    border:1px solid rgba(190,160,255,.22);
+    background:rgba(180,140,255,.10);
+    color:#ede6ff;
+    transition:background .15s, transform .08s;
+  }
+  .card button:active{transform:scale(.96)}
+  .card button.primary{
+    background:linear-gradient(180deg,#a07cff,#7a5ce8);
+    border-color:transparent; color:#fff;
+    box-shadow:0 8px 22px -8px #a07cff;
+  }
+
+  /* ---------- surprise (romantic letter) card ---------- */
+  .card.surprise{
+    max-height: 88vh;
+    overflow-y: auto;
+    text-align: left;
+    padding: 24px 22px 20px;
+    border: 2px solid transparent;
+    background:
+      linear-gradient(160deg,#3a1c3f,#1a1030) padding-box,
+      linear-gradient(120deg,#ff8cf0,#ff5fa2,#a07cff,#ff8cf0) border-box;
+    background-size: 100% 100%, 300% 300%;
+    animation: pop .32s cubic-bezier(.2,1.5,.5,1), borderflow 4s linear infinite;
+    box-shadow: 0 30px 70px -20px #000, 0 0 130px -18px #ff8cf0;
+    scrollbar-width: thin;
+    scrollbar-color: #a07cff transparent;
+  }
+  .card.surprise::-webkit-scrollbar{width:8px}
+  .card.surprise::-webkit-scrollbar-thumb{
+    background:rgba(190,150,255,.45);
+    border-radius:99px;
+  }
+  @keyframes borderflow{
+    0%{background-position:0 0, 0% 50%}
+    100%{background-position:0 0, 300% 50%}
+  }
+  .card.surprise .big{
+    text-align:center;
+    font-size:44px;
+    margin-bottom:2px;
+    animation: spinpop 1.6s ease-in-out infinite;
+  }
+  @keyframes spinpop{
+    50%{transform:scale(1.18) rotate(6deg)}
+  }
+  .card.surprise h2{
+    text-align:center;
+    color:#ffd9f2;
+    font-size:clamp(22px, 5.4vw, 27px);
+    margin:0 0 14px;
+    animation: glowpulse 2s ease-in-out infinite;
+  }
+  @keyframes glowpulse{
+    50%{text-shadow:0 0 24px rgba(255,150,220,.95), 0 0 52px rgba(200,120,255,.6)}
+  }
+  .card.surprise .letter p{
+    font-size:clamp(14px, 3.5vw, 15.5px);
+    line-height:1.68;
+    color:#f0dcf8;
+    margin:0 0 14px;
+    text-align:left;
+  }
+  .card.surprise .letter p:first-child{
+    font-size:clamp(15px, 3.8vw, 17px);
+    color:#ffe6fb;
+  }
+  .card.surprise .letter em{
+    font-style:normal;
+    color:#ffb3e6;
+    font-weight:700;
+    text-shadow:0 0 14px rgba(255,140,220,.5);
+  }
+  .card.surprise .letter strong{
+    color:#fff;
+    font-weight:800;
+    background:linear-gradient(90deg,#ff9ae0,#c9a2ff);
+    -webkit-background-clip:text;
+    background-clip:text;
+    -webkit-text-fill-color:transparent;
+    text-shadow:none;
+  }
+  .card.surprise .letter .signoff{
+    text-align:center;
+    font-size:clamp(16px, 4vw, 19px);
+    color:#ffc6ee;
+    font-weight:700;
+    margin-top:18px;
+    text-shadow:0 0 20px rgba(255,140,220,.55);
+  }
+
+  /* ---------- 16:9 local photo + fallback ---------- */
+  .card.surprise .letter .photo-wrap{ margin: 20px 0 4px; }
+  .card.surprise .letter .photo{
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    margin: 0;
+    border-radius: 14px;
+    box-shadow: 0 0 0 2px rgba(255,150,220,.35), 0 14px 34px -14px #000;
+  }
+  .card.surprise .letter .photo-placeholder{
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+    border-radius: 14px;
+    border: 2px dashed rgba(255,150,220,.55);
+    background:
+      radial-gradient(circle at 50% 45%, rgba(255,150,220,.12), rgba(160,120,255,.05) 70%);
+    color: #ffb3e6;
+    font-size: 13px;
+    letter-spacing: .6px;
+    text-align: center;
+    box-shadow: inset 0 0 34px rgba(255,120,200,.16), 0 0 26px -12px rgba(255,140,220,.6);
+  }
+
+  /* screen shake for the surprise */
+  .stage.shake{animation:shake .7s ease-in-out}
+  @keyframes shake{
+    0%,100%{transform:translate(0,0)}
+    15%{transform:translate(-10px,5px) rotate(-.7deg)}
+    30%{transform:translate(9px,-6px) rotate(.7deg)}
+    45%{transform:translate(-7px,4px) rotate(-.5deg)}
+    60%{transform:translate(6px,-3px) rotate(.5deg)}
+    80%{transform:translate(-3px,2px)}
+  }
+
+  .confetti{position:fixed; top:0; pointer-events:none; z-index:60; animation:fall linear forwards}
+  @keyframes fall{to{transform:translateY(108vh) rotate(400deg); opacity:.15}}
+
+  .heart-float{position:fixed; bottom:-48px; pointer-events:none; z-index:60; animation:rise linear forwards}
+  @keyframes rise{
+    to{transform:translateY(-118vh) rotate(22deg); opacity:0}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>cat maze</h1>
+  <p class="sub">guide the cat to the fish for a prize!</p>
+</header>
+
+<div class="hud">
+  <span>maze <b id="levelEl">1</b>/3</span>
+  <span>moves <b id="movesEl">0</b></span>
+</div>
+
+<div class="stage">
+  <div class="viewport" id="viewport">
+    <div class="maze" id="maze"></div>
+    <div class="vignette"></div>
+  </div>
+</div>
+
+<div class="dpad">
+  <button data-dx="0"  data-dy="-1">▲</button>
+  <button data-dx="-1" data-dy="0">◀</button>
+  <button data-dx="1"  data-dy="0">▶</button>
+  <button data-dx="0"  data-dy="1">▼</button>
+</div>
+
+<p class="hint">arrow keys / wasd / swipe / tap the arrows.<br>the maze is much bigger than the screen — you can only see around the cat.</p>
+
+<div id="overlay" class="overlay hidden">
+  <div class="card" id="card">
+    <div class="big" id="bigEmoji">🐱✨🐟</div>
+    <h2 id="winTitle">good job babi!</h2>
+    <p id="messageText">lets head to the next one</p>
+    <div class="row">
+      <button id="nextBtn" class="primary">next maze ▶</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---------- elements ----------
+  const viewportEl = document.getElementById('viewport');
+  const mazeEl     = document.getElementById('maze');
+  const levelEl    = document.getElementById('levelEl');
+  const movesEl    = document.getElementById('movesEl');
+  const overlay    = document.getElementById('overlay');
+  const cardEl     = document.getElementById('card');
+  const msgTextEl  = document.getElementById('messageText');
+  const winTitle   = document.getElementById('winTitle');
+  const bigEmoji   = document.getElementById('bigEmoji');
+  const nextBtn    = document.getElementById('nextBtn');
+
+  // ---------- reward text for mazes 1 & 2 ----------
+  const REWARD_TITLE   = "good job babi!";
+  const REWARD_MESSAGE = "lets head to the next one";
+
+  // ---------- last maze: the romantic birthday letter ----------
+  const SURPRISE = {
+    title: "happy 18th birthday, my love",
+    emoji: "🎂",
+    html: `
+      <p>hi baobei! today is one of the biggest days of your life. today, you turn <strong>18</strong>.</p>
+
+      <p>approximately, you have lived for <strong>157,680 hours</strong>. or around <strong>9,460,800 minutes</strong>. which translates to <strong>567,648,000 seconds</strong>. in all that time, even through so many hardships and mishaps, you proved to be <em>strong</em>. you proved to be <em>capable</em>. you proved to be <em>kind</em>. and above all you proved to be <em>yourself</em>.</p>
+
+      <p>i know very well the scars your beautiful soul has. ever since you were little, you were always pushed into corners. you were treated like an outcast at times. in a time where your heart was still so frail and brittle, you were forced to accept how cruel the world is. but even so, you picked yourself up, every single day, for 18 years. and look at where it's gotten you!</p>
+
+      <p>you've gotten far babi. farther than you would have ever thought. you have achieved many things. you've fought, and especially prevailed your silent battles. you shed countless tears. you made wonderful memories. you left graceful traces of you on everyone's soul. and above all <strong>you kept going</strong>.</p>
+
+      <p>i'm forever grateful that i have met you babi.</p>
+
+      <p>this is the first and only time you turn 18. and this is the first time i get to greet someone formally for their birthday. we've shared a lot of firsts together babi. and i'm so grateful i get to share this for the first time with you.</p>
+
+      <p>you've made me so proud bab. you've showed incomparable strength throughout your life. you're an endless stream of love and happiness that fills me everyday, and i feel it always. even though i might have only seen a very small fraction of these 18 years, i can still definitely see what has flourished from it. you've become a fine and beautiful young woman.</p>
+
+      <p>if only i could be around for you babi. i say to you again, <strong>happy birthday my love</strong>.</p>
+
+      <p class="signoff">happy 18th, my love</p>
+
+      <div class="photo-wrap">
+        <img class="photo" src="bdaypic.webp" alt="us"
+             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+        <div class="photo-placeholder" style="display:none">16:9 image placeholder</div>
+      </div>
+    `
+  };
+
+  // ---------- persistent sprites ----------
+  const catEl = document.createElement('div');
+  catEl.className = 'cat';
+  catEl.innerHTML = '<span>🐱</span>';
+
+  const goalEl = document.createElement('div');
+  goalEl.className = 'goal';
+  goalEl.innerHTML = '<span>🐟</span>';
+
+  // ---------- the three mazes (bigger + harder each time) ----------
+  const LEVELS = [
+    { cells: 9,  seed: 20240607 },
+    { cells: 14, seed: 777123 },
+    { cells: 20, seed: 31415926 }
+  ];
+
+  // how many cells wide the camera view is
+  const VIEW_CELLS = 5.5;
+
+  // ---------- state ----------
+  let level = 0;
+  let grid, cols, rows, cell = 60;
+  let cat = { x: 1, y: 1 };
+  let goal = { x: 1, y: 1 };
+  let cellEls = [];
+  let visited = new Set();
+  let moves = 0, won = false;
+
+  // ---------- seeded rng ----------
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // ---------- maze generation ----------
+  function generateMaze(n, rand) {
+    const cols = n * 2 + 1, rows = n * 2 + 1;
+    const g = Array.from({ length: rows }, () => Array(cols).fill(1));
+    const stack = [[1, 1]];
+    g[1][1] = 0;
+    const dirs = [[2, 0], [-2, 0], [0, 2], [0, -2]];
+
+    while (stack.length) {
+      const [x, y] = stack[stack.length - 1];
+      const options = dirs.filter(([dx, dy]) => {
+        const nx = x + dx, ny = y + dy;
+        return nx > 0 && ny > 0 && nx < cols - 1 && ny < rows - 1 && g[ny][nx] === 1;
+      });
+      if (!options.length) { stack.pop(); continue; }
+      const [dx, dy] = options[Math.floor(rand() * options.length)];
+      g[y + dy / 2][x + dx / 2] = 0;
+      g[y + dy][x + dx] = 0;
+      stack.push([x + dx, y + dy]);
+    }
+    return { grid: g, cols, rows };
+  }
+
+  // ---------- sizing ----------
+  function computeSizes() {
+    const maxW = Math.min(window.innerWidth - 26, 560);
+    const maxH = Math.min(window.innerHeight - 260, 560);
+    const side = Math.max(190, Math.min(maxW, maxH));
+    viewportEl.style.width  = side + 'px';
+    viewportEl.style.height = side + 'px';
+    cell = Math.max(24, Math.round(side / VIEW_CELLS));
+  }
+
+  // ---------- render ----------
+  function sizeAndRender(instant) {
+    computeSizes();
+
+    mazeEl.style.width  = (cols * cell) + 'px';
+    mazeEl.style.height = (rows * cell) + 'px';
+    mazeEl.style.gridTemplateColumns = `repeat(${cols}, ${cell}px)`;
+    mazeEl.style.gridTemplateRows    = `repeat(${rows}, ${cell}px)`;
+
+    mazeEl.innerHTML = '';
+    cellEls = [];
+
+    const isWall = (xx, yy) =>
+      (xx < 0 || yy < 0 || xx >= cols || yy >= rows) ? true : grid[yy][xx] === 1;
+
+    for (let y = 0; y < rows; y++) {
+      const row = [];
+      for (let x = 0; x < cols; x++) {
+        const wall = grid[y][x] === 1;
+        const d = document.createElement('div');
+        d.className = 'cell ' + (wall ? 'wall' : 'path');
+
+        if (wall) {
+          if (!isWall(x - 1, y) && !isWall(x, y - 1)) d.classList.add('r-tl');
+          if (!isWall(x + 1, y) && !isWall(x, y - 1)) d.classList.add('r-tr');
+          if (!isWall(x - 1, y) && !isWall(x, y + 1)) d.classList.add('r-bl');
+          if (!isWall(x + 1, y) && !isWall(x, y + 1)) d.classList.add('r-br');
+        } else if (visited.has(x + ',' + y)) {
+          d.classList.add('visited');
+        }
+
+        mazeEl.appendChild(d);
+        row.push(d);
+      }
+      cellEls.push(row);
+    }
+
+    const emojiSize = Math.round(cell * 0.8) + 'px';
+    for (const el of [catEl, goalEl]) {
+      el.style.width = el.style.height = cell + 'px';
+      el.style.fontSize = emojiSize;
+    }
+
+    goalEl.style.transform = `translate(${goal.x * cell}px, ${goal.y * cell}px)`;
+    catEl.style.transform  = `translate(${cat.x * cell}px, ${cat.y * cell}px)`;
+
+    mazeEl.appendChild(goalEl);
+    mazeEl.appendChild(catEl);
+
+    if (instant) {
+      mazeEl.style.transition = 'none';
+      catEl.style.transition = 'none';
+      void mazeEl.offsetHeight;
+    }
+
+    updateCamera(instant);
+
+    if (instant) {
+      requestAnimationFrame(() => {
+        mazeEl.style.transition = '';
+        catEl.style.transition = '';
+      });
+    }
+  }
+
+  // ---------- camera ----------
+  function updateCamera(instant) {
+    const vw = viewportEl.clientWidth;
+    const vh = viewportEl.clientHeight;
+    const mazeW = cols * cell;
+    const mazeH = rows * cell;
+
+    let tx = vw / 2 - (cat.x * cell + cell / 2);
+    let ty = vh / 2 - (cat.y * cell + cell / 2);
+
+    tx = (mazeW <= vw) ? (vw - mazeW) / 2 : Math.min(0, Math.max(vw - mazeW, tx));
+    ty = (mazeH <= vh) ? (vh - mazeH) / 2 : Math.min(0, Math.max(vh - mazeH, ty));
+
+    mazeEl.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
+  }
+
+  // ---------- hud ----------
+  function updateHud() { movesEl.textContent = moves; }
+
+  // ---------- level setup ----------
+  function buildLevel(idx) {
+    level = idx;
+    const L = LEVELS[idx];
+    const rand = mulberry32(L.seed);
+    const m = generateMaze(L.cells, rand);
+
+    grid = m.grid; cols = m.cols; rows = m.rows;
+    cat  = { x: 1, y: 1 };
+    goal = { x: cols - 2, y: rows - 2 };
+    visited = new Set(['1,1']);
+    moves = 0;
+    won = false;
+
+    overlay.classList.add('hidden');
+    cardEl.classList.remove('surprise');
+    msgTextEl.classList.remove('letter');
+    msgTextEl.style.textAlign = '';
+
+    levelEl.textContent = idx + 1;
+    sizeAndRender(true);
+    updateHud();
+  }
+
+  // ---------- movement ----------
+  function tryMove(dx, dy) {
+    if (won) return;
+    const nx = cat.x + dx, ny = cat.y + dy;
+    if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) return;
+    if (grid[ny][nx] === 1) return;
+
+    cat.x = nx; cat.y = ny;
+    moves++;
+
+    const key = nx + ',' + ny;
+    if (!visited.has(key)) {
+      visited.add(key);
+      cellEls[ny][nx].classList.add('visited');
+    }
+
+    catEl.style.transform = `translate(${nx * cell}px, ${ny * cell}px)`;
+    updateCamera(false);
+    updateHud();
+
+    if (nx === goal.x && ny === goal.y) winLevel();
+  }
+
+  // ---------- winning ----------
+  function winLevel() {
+    won = true;
+    const isLast = level === LEVELS.length - 1;
+
+    if (isLast) {
+      // ---- romantic surprise finale ----
+      winTitle.textContent = SURPRISE.title;
+      msgTextEl.innerHTML = SURPRISE.html;
+      msgTextEl.classList.add('letter');
+      bigEmoji.textContent = SURPRISE.emoji;
+      nextBtn.textContent = 'play again';
+
+      cardEl.classList.add('surprise');
+      overlay.classList.remove('hidden');
+      surpriseEffects();
+    } else {
+      // ---- normal reward ----
+      winTitle.textContent = REWARD_TITLE;
+      msgTextEl.textContent = REWARD_MESSAGE;
+      msgTextEl.classList.remove('letter');
+      bigEmoji.textContent = '🐱✨🐟';
+      nextBtn.textContent = 'next maze ▶';
+
+      cardEl.classList.remove('surprise');
+      overlay.classList.remove('hidden');
+      confetti(26, false);
+    }
+  }
+
+  // ---------- confetti ----------
+  function confetti(count, big) {
+    const emojis = ['✨', '⭐', '🐾', '💛', '🐟', '🎉', '🐱', '💜', '🎁', '🌈'];
+    for (let i = 0; i < count; i++) {
+      const el = document.createElement('div');
+      el.className = 'confetti';
+      el.textContent = emojis[(Math.random() * emojis.length) | 0];
+      el.style.left = (2 + Math.random() * 96) + 'vw';
+      el.style.fontSize = ((big ? 18 : 13) + Math.random() * (big ? 34 : 20)) + 'px';
+      el.style.animationDuration = ((big ? 1.8 : 1.3) + Math.random() * 1.8) + 's';
+      el.style.animationDelay = (Math.random() * 0.6) + 's';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 4400);
+    }
+  }
+
+  function sparkleBurst() {
+    for (let i = 0; i < 10; i++) {
+      const el = document.createElement('div');
+      el.className = 'confetti';
+      el.textContent = '✨';
+      el.style.left = (Math.random() * 100) + 'vw';
+      el.style.fontSize = (10 + Math.random() * 16) + 'px';
+      el.style.animationDuration = (1 + Math.random() * 1.4) + 's';
+      el.style.animationDelay = (Math.random() * 0.3) + 's';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 3000);
+    }
+  }
+
+  // ---------- floating hearts ----------
+  function hearts(count) {
+    const set = ['💗','💕','💖','💞','❤️','💘','🌸','💝'];
+    for (let i = 0; i < count; i++) {
+      const el = document.createElement('div');
+      el.className = 'heart-float';
+      el.textContent = set[(Math.random() * set.length) | 0];
+      el.style.left = (Math.random() * 96) + 'vw';
+      el.style.fontSize = (14 + Math.random() * 26) + 'px';
+      el.style.animationDuration = (3.5 + Math.random() * 3) + 's';
+      el.style.animationDelay = (Math.random() * 1.4) + 's';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 8000);
+    }
+  }
+
+  // ---------- little victory chime (web audio, no voice) ----------
+  function chime() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const ctx = new AC();
+      const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+      notes.forEach((f, i) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.value = f;
+        const t = ctx.currentTime + i * 0.11;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.16, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(t); o.stop(t + 0.75);
+      });
+      setTimeout(() => ctx.close(), 2200);
+    } catch (e) { /* audio not available — no biggie */ }
+  }
+
+  // ---------- all the extra surprise effects ----------
+  function surpriseEffects() {
+    confetti(80, true);
+    setTimeout(() => confetti(55, true), 420);
+    setTimeout(() => confetti(40, false), 900);
+
+    // endless-ish floating hearts
+    hearts(28);
+    setTimeout(() => hearts(20), 900);
+    setTimeout(() => hearts(16), 1900);
+    setTimeout(() => hearts(12), 3000);
+
+    // screen shake
+    const stage = document.querySelector('.stage');
+    stage.classList.add('shake');
+    setTimeout(() => stage.classList.remove('shake'), 720);
+
+    // rolling sparkle bursts
+    let n = 0;
+    const iv = setInterval(() => {
+      sparkleBurst();
+      if (++n >= 7) clearInterval(iv);
+    }, 750);
+
+    // fanfare
+    chime();
+  }
+
+  // ---------- keyboard: movement ----------
+  window.addEventListener('keydown', (e) => {
+    let dx = 0, dy = 0;
+    switch (e.key) {
+      case 'ArrowUp': case 'w': case 'W': dy = -1; break;
+      case 'ArrowDown': case 's': case 'S': dy = 1; break;
+      case 'ArrowLeft': case 'a': case 'A': dx = -1; break;
+      case 'ArrowRight': case 'd': case 'D': dx = 1; break;
+      default: return;
+    }
+    e.preventDefault();
+    tryMove(dx, dy);
+  });
+
+  // ---------- quick skip straight to the finale (Shift + K) ----------
+  function skipToFinale() {
+    buildLevel(LEVELS.length - 1);
+    cat.x = goal.x;
+    cat.y = goal.y;
+    catEl.style.transform = `translate(${cat.x * cell}px, ${cat.y * cell}px)`;
+    updateCamera(false);
+    winLevel();
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.shiftKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      skipToFinale();
+    }
+  });
+
+  // ---------- d-pad ----------
+  document.querySelectorAll('.dpad button').forEach(btn => {
+    btn.addEventListener('click', () => tryMove(+btn.dataset.dx, +btn.dataset.dy));
+  });
+
+  // ---------- swipe ----------
+  let touchStart = null;
+  viewportEl.addEventListener('touchstart', (e) => {
+    const t = e.changedTouches[0];
+    touchStart = { x: t.clientX, y: t.clientY };
+  }, { passive: true });
+
+  viewportEl.addEventListener('touchend', (e) => {
+    if (!touchStart) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.x;
+    const dy = t.clientY - touchStart.y;
+    touchStart = null;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 22) return;
+    if (Math.abs(dx) > Math.abs(dy)) tryMove(Math.sign(dx), 0);
+    else tryMove(0, Math.sign(dy));
+  }, { passive: true });
+
+  // ---------- overlay button ----------
+  nextBtn.addEventListener('click', () => {
+    const isLast = level === LEVELS.length - 1;
+    buildLevel(isLast ? 0 : level + 1);
+  });
+
+  // ---------- resize ----------
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => sizeAndRender(true), 130);
+  });
+
+  // ---------- go ----------
+  buildLevel(0);
+})();
+</script>
+</body>
+</html>
